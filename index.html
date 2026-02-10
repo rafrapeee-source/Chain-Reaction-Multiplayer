@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chain Reaction Pro Multiplayer</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        :root {
+            --bg-color: #0a0a0a;
+            --cell-bg: #161616;
+            --border-color: #333;
+            --current-player-color: #ff4d4d;
+            /* Default values, will be overwritten by JS */
+            --rows: 9;
+            --cols: 6;
+            /* Logic: Use the smaller of (available width / cols) or (available height / rows) */
+            --cell-size: min(calc(85vw / var(--cols)), calc(70vh / var(--rows)));
+            --orb-size: calc(var(--cell-size) * 0.35);
+        }
+
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            background: var(--bg-color); 
+            color: white; 
+            margin: 0; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden; 
+        }
+
+        /* Screens */
+        .screen { display: none; flex-direction: column; align-items: center; width: 100%; max-width: 400px; padding: 20px; box-sizing: border-box;}
+        .active { display: flex; }
+        #screen-game { max-width: 100%; } /* Allow board to be wider than menu */
+
+        h1 { letter-spacing: 5px; text-shadow: 0 0 10px #ff4d4d; text-align: center; }
+        input { width: 100%; padding: 12px; margin: 10px 0; border-radius: 5px; border: 1px solid #444; background: #222; color: white; font-size: 1rem; box-sizing: border-box; }
+        button { width: 100%; padding: 12px; margin: 5px 0; border-radius: 5px; border: none; background: #ff4d4d; color: white; font-weight: bold; cursor: pointer; font-size: 1rem; }
+        button:disabled { background: #444; cursor: not-allowed; opacity: 0.6; }
+
+        /* Lobby Player List */
+        #player-list { width: 100%; background: #111; border-radius: 8px; padding: 10px; margin: 20px 0; border: 1px solid #333; }
+        .player-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #222; }
+        .player-color { width: 18px; height: 18px; border-radius: 50%; margin-right: 12px; border: 2px solid rgba(255,255,255,0.2); }
+        .host-badge { font-size: 0.65rem; background: #ffd700; color: #000; padding: 2px 6px; border-radius: 4px; margin-left: auto; font-weight: bold; }
+
+        /* Game Elements */
+        #status { 
+            margin-bottom: 15px; 
+            font-weight: 800; 
+            text-transform: uppercase; 
+            height: 2.5rem; 
+            display: flex; 
+            align-items: center; 
+            text-align: center;
+            letter-spacing: 1px;
+        }
+
+        #game-board { 
+            display: grid; 
+            background: var(--border-color); 
+            gap: 2px; 
+            border: 3px solid var(--border-color); 
+            padding: 2px; 
+            border-radius: 8px; 
+            box-shadow: 0 0 30px rgba(0,0,0,0.5), 0 0 15px var(--current-player-color);
+            /* This is crucial: make sure the grid respects the column count */
+            grid-template-columns: repeat(var(--cols), var(--cell-size));
+            grid-template-rows: repeat(var(--rows), var(--cell-size));
+            width: fit-content;
+            margin: 0 auto;
+        }
+
+        .cell { 
+            width: var(--cell-size); 
+            height: var(--cell-size); 
+            background: var(--cell-bg); 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            position: relative; 
+            cursor: pointer; 
+            overflow: visible;
+        }
+
+        /* Orbs and Animations */
+        .orb { 
+            width: var(--orb-size); 
+            height: var(--orb-size); 
+            border-radius: 50%; 
+            position: absolute; 
+            background: radial-gradient(circle at 30% 30%, #fff, currentColor 60%, #000 100%); 
+            z-index: 2; 
+            box-shadow: 0 0 8px rgba(0,0,0,0.5);
+        }
+
+        .container { 
+            position: relative; width: 100%; height: 100%; 
+            display: flex; align-items: center; justify-content: center; 
+            animation: rotateContainer 4s linear infinite; 
+        }
+
+        @keyframes rotateContainer { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        
+        /* Orb Positioning */
+        .orb-1 { transform: scale(1.2); }
+        .orb-2:nth-child(1) { transform: translate(-20%, 0); }
+        .orb-2:nth-child(2) { transform: translate(20%, 0); }
+        .orb-3:nth-child(1) { transform: translate(0, -22%); }
+        .orb-3:nth-child(2) { transform: translate(-20%, 15%); }
+        .orb-3:nth-child(3) { transform: translate(20%, 15%); }
+
+        .vibrate { animation: jitter 0.12s linear infinite; }
+        @keyframes jitter { 0% { transform: translate(0,0); } 25% { transform: translate(1px, -1px); } 50% { transform: translate(-1px, 1px); } 100% { transform: translate(0,0); } }
+        
+        .exploding { animation: pop 0.2s ease-out forwards; z-index: 10; }
+        @keyframes pop { 0% { transform: scale(1); } 50% { transform: scale(1.5); filter: brightness(1.8); } 100% { transform: scale(0); } }
+
+        #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.95); flex-direction: column; align-items: center; justify-content: center; z-index: 100; }
+
+        .eliminated-msg {
+            color: #ff4d4d;
+            font-size: 0.8rem;
+            font-weight: bold;
+            margin-top: 5px;
+            animation: blink 1s infinite;
+        }
+        @keyframes blink { 50% { opacity: 0.3; } }
+        
+        #spectator-ui {
+            display: none;
+            background: rgba(255, 0, 0, 0.2);
+            padding: 5px 15px;
+            border-radius: 20px;
+            margin-bottom: 10px;
+            border: 1px solid red;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- SCREEN 1: Entry -->
+    <div id="screen-entry" class="screen active">
+        <h1>CHAIN REACTION</h1>
+        <input type="text" id="nameInput" placeholder="Your Name" maxlength="12">
+        <input type="text" id="roomInput" placeholder="Lobby Name" maxlength="15">
+        <button onclick="join(true)">HOST GAME</button>
+        <button style="background: #444;" onclick="join(false)">JOIN GAME</button>
+    </div>
+
+    <!-- SCREEN 2: Lobby -->
+    <div id="screen-lobby" class="screen">
+        <h2 id="lobby-title" style="margin:0; color:#ff4d4d">Lobby</h2>
+        <div id="player-list"></div>
+        <button id="startBtn" onclick="requestStart()" disabled>WAITING FOR HOST...</button>
+        <button style="background: #333;" onclick="location.reload()">LEAVE ROOM</button>
+    </div>
+
+    <!-- SCREEN 3: Game -->
+    <div id="screen-game" class="screen">
+        <div id="spectator-ui">YOU ARE ELIMINATED - SPECTATING</div>
+        <div id="status">INITIALIZING...</div>
+        <div id="game-board"></div>
+    </div>
+
+    <!-- Overlay: Winner -->
+    <div id="overlay">
+        <h1 id="winner-text"></h1>
+        <div id="host-only-controls" style="display:none; width: 100%;">
+            <button onclick="requestReset()">RETURN TO LOBBY</button>
+        </div>
+        <p id="guest-msg" style="color: #888;">Waiting for host to reset...</p>
+        <button style="background: #333; margin-top:10px" onclick="location.reload()">EXIT TO MENU</button>
+    </div>
+
+    <script>
+      const socket = io();
+      let myId = null;
+      let players = [];
+      let currentPlayerIdx = 0;
+      let boardData = [];
+      let ROWS, COLS, isHost = false;
+      let isProcessing = false;
+
+      function showScreen(id) {
+          document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+          document.getElementById(id).classList.add('active');
+      }
+
+      function join(hostFlag) {
+          const playerName = document.getElementById('nameInput').value.trim();
+          const roomName = document.getElementById('roomInput').value.trim();
+          if(!playerName || !roomName) return alert("Enter all fields");
+          isHost = hostFlag;
+          socket.emit('join-room', { roomName, playerName, isHost });
+          document.getElementById('lobby-title').innerText = `Room: ${roomName}`;
+          showScreen('screen-lobby');
+      }
+
+      socket.on('lobby-update', ({ players: serverPlayers, hostId }) => {
+          players = serverPlayers;
+          isHost = (socket.id === hostId);
+          const list = document.getElementById('player-list');
+          list.innerHTML = '';
+          players.forEach(p => {
+              const item = document.createElement('div');
+              item.className = 'player-item';
+              item.innerHTML = `<div class="player-color" style="background:${p.color}"></div>
+                  <span>${p.name} ${p.id === socket.id ? '(You)' : ''}</span>
+                  ${p.id === hostId ? '<span class="host-badge">HOST</span>' : ''}`;
+              list.appendChild(item);
+          });
+          const startBtn = document.getElementById('startBtn');
+          startBtn.disabled = !isHost || players.length < 2;
+          if(isHost) startBtn.innerText = players.length < 2 ? "NEED 2+ PLAYERS" : "START GAME";
+      });
+
+      function requestStart() { socket.emit('start-game'); }
+      function requestReset() { socket.emit('reset-room'); }
+
+      socket.on('return-to-lobby', () => {
+          document.getElementById('overlay').style.display = 'none';
+          document.getElementById('spectator-ui').style.display = 'none';
+          showScreen('screen-lobby');
+      });
+
+      socket.on('game-init', ({ config, players: serverPlayers }) => {
+          ROWS = config.rows; COLS = config.cols;
+          document.documentElement.style.setProperty('--rows', ROWS);
+          document.documentElement.style.setProperty('--cols', COLS);
+          players = serverPlayers.map(p => ({ ...p, active: true, hasMoved: false }));
+          showScreen('screen-game');
+          initBoard();
+      });
+
+      function initBoard() {
+          const boardEl = document.getElementById('game-board');
+          boardEl.innerHTML = '';
+          boardData = Array.from({ length: ROWS }, () => []);
+          for (let r = 0; r < ROWS; r++) {
+              for (let c = 0; c < COLS; c++) {
+                  boardData[r][c] = { owner: null, count: 0 };
+                  const cell = document.createElement('div');
+                  cell.className = 'cell';
+                  cell.id = `cell-${r}-${c}`;
+                  cell.onclick = () => handleCellClick(r, c);
+                  boardEl.appendChild(cell);
+              }
+          }
+          updateStatus();
+      }
+
+      async function handleCellClick(r, c) {
+          const myIdx = players.findIndex(p => p.id === socket.id);
+          // Block move if: processing, not your turn, or you are eliminated
+          if (isProcessing || currentPlayerIdx !== myIdx || !players[myIdx].active) return;
+          const cell = boardData[r][c];
+          if (cell.owner !== null && cell.owner !== myIdx) return;
+
+          socket.emit('make-move', { r, c, playerIdx: myIdx });
+          await executeMove(r, c, myIdx);
+      }
+
+      socket.on('receive-move', async (data) => {
+          await executeMove(data.r, data.c, data.playerIdx);
+      });
+
+      async function executeMove(r, c, pIdx) {
+          isProcessing = true;
+          players[pIdx].hasMoved = true;
+          await addOrb(r, c, pIdx);
+          
+          // Find next active player
+          let nextIdx = pIdx;
+          let activeCount = players.filter(p => p.active).length;
+          
+          if (activeCount > 1) {
+              do {
+                  nextIdx = (nextIdx + 1) % players.length;
+              } while (!players[nextIdx].active);
+          }
+          
+          currentPlayerIdx = nextIdx;
+          updateStatus();
+          isProcessing = false;
+          checkWin();
+      }
+
+      async function addOrb(r, c, pIdx) {
+          const cell = boardData[r][c];
+          cell.owner = pIdx;
+          cell.count++;
+          const limit = getLimit(r, c);
+          renderCell(r, c);
+
+          if (cell.count >= limit) {
+              const cellDiv = document.getElementById(`cell-${r}-${c}`);
+              cellDiv.classList.add('exploding');
+              await new Promise(res => setTimeout(res, 150));
+              cell.count = 0; cell.owner = null;
+              renderCell(r, c);
+              cellDiv.classList.remove('exploding');
+              const neighbors = [[r-1,c], [r+1,c], [r,c-1], [r,c+1]];
+              for (const [nr, nc] of neighbors) {
+                  if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) await addOrb(nr, nc, pIdx);
+              }
+          }
+          refreshActivePlayers();
+      }
+
+      function refreshActivePlayers() {
+          players.forEach((p, idx) => {
+              if (p.hasMoved && p.active) {
+                  let count = 0;
+                  boardData.flat().forEach(c => { if(c.owner === idx) count++; });
+                  if (count === 0) {
+                      p.active = false;
+                      if (p.id === socket.id) {
+                          document.getElementById('spectator-ui').style.display = 'block';
+                      }
+                  }
+              }
+          });
+      }
+
+      function checkWin() {
+          const active = players.filter(p => p.active);
+          const moved = players.filter(p => p.hasMoved);
+          if (moved.length > 1 && active.length === 1) {
+              const winText = document.getElementById('winner-text');
+              winText.innerText = `${active[0].name.toUpperCase()} WINS!`;
+              winText.style.color = active[0].color;
+              
+              // Show host controls to reset the game
+              document.getElementById('host-only-controls').style.display = isHost ? 'block' : 'none';
+              document.getElementById('guest-msg').style.display = isHost ? 'none' : 'block';
+              document.getElementById('overlay').style.display = 'flex';
+          }
+      }
+
+      function getLimit(r, c) {
+          let corners = (r === 0 || r === ROWS-1) && (c === 0 || c === COLS-1);
+          let edges = (r === 0 || r === ROWS-1 || c === 0 || c === COLS-1);
+          return corners ? 2 : (edges ? 3 : 4);
+      }
+
+      function renderCell(r, c) {
+          const div = document.getElementById(`cell-${r}-${c}`);
+          const data = boardData[r][c];
+          div.innerHTML = '';
+          if (data.count > 0) {
+              const container = document.createElement('div');
+              container.className = 'container';
+              if (data.count === getLimit(r, c) - 1) div.classList.add('vibrate');
+              else div.classList.remove('vibrate');
+              for (let i = 0; i < data.count; i++) {
+                  const orb = document.createElement('div');
+                  orb.className = `orb orb-${data.count}`;
+                  orb.style.color = players[data.owner].color;
+                  container.appendChild(orb);
+              }
+              div.appendChild(container);
+          } else { div.classList.remove('vibrate'); }
+      }
+
+      function updateStatus() {
+          const p = players[currentPlayerIdx];
+          const status = document.getElementById('status');
+          const myTurn = (p.id === socket.id);
+          const meEliminated = !players.find(pl => pl.id === socket.id).active;
+
+          if (meEliminated) {
+              status.innerText = `SPECTATING: ${p.name.toUpperCase()}'S TURN`;
+          } else {
+              status.innerText = myTurn ? "YOUR TURN" : `${p.name.toUpperCase()}'S TURN`;
+          }
+          status.style.color = p.color;
+          document.documentElement.style.setProperty('--current-player-color', p.color);
+      }
+
+      socket.on('error-msg', (msg) => { alert(msg); location.reload(); });
+  </script>
+</body>
+</html>
