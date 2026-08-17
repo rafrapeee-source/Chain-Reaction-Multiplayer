@@ -667,6 +667,88 @@
       });
 
       // Wave-based (BFS) explosion logic. Prevents call-stack overflows and desyncs.
+      // async function executeMove(startR, startC, pIdx) {
+      //   isProcessing = true;
+      //   players[pIdx].hasMoved = true;
+
+      //   let queue = [{ r: startR, c: startC, pIdx: pIdx }];
+
+      //   while (queue.length > 0) {
+      //     let nextQueue = [];
+      //     let explodedCells = [];
+
+      //     // 1. Process all additions for this wave
+      //     for (const move of queue) {
+      //       const cell = boardData[move.r][move.c];
+      //       cell.owner = move.pIdx;
+      //       cell.count++;
+
+      //       if (cell.count >= getLimit(move.r, move.c)) {
+      //         cell.count = 0;
+      //         cell.owner = null;
+      //         explodedCells.push({ r: move.r, c: move.c, pIdx: move.pIdx });
+      //       }
+      //     }
+
+      //     // 2. Render UI for this wave
+      //     for (const move of queue) renderCell(move.r, move.c);
+
+      //     // 3. Handle explosions if any
+      //     if (explodedCells.length > 0) {
+      //       explodedCells.forEach((exp) =>
+      //         document
+      //           .getElementById(`cell-${exp.r}-${exp.c}`)
+      //           .classList.add("exploding")
+      //       );
+
+      //       await new Promise((res) => setTimeout(res, 200)); // Sync animation time
+
+      //       explodedCells.forEach((exp) => {
+      //         document
+      //           .getElementById(`cell-${exp.r}-${exp.c}`)
+      //           .classList.remove("exploding");
+      //         const neighbors = [
+      //           [exp.r - 1, exp.c],
+      //           [exp.r + 1, exp.c],
+      //           [exp.r, exp.c - 1],
+      //           [exp.r, exp.c + 1],
+      //         ];
+      //         for (const [nr, nc] of neighbors) {
+      //           if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
+      //             nextQueue.push({ r: nr, c: nc, pIdx: exp.pIdx });
+      //           }
+      //         }
+      //       });
+      //     }
+
+      //     queue = nextQueue;
+      //     refreshActivePlayers();
+
+      //     // Optimization: Stop computing cascades if the game is already won
+      //     if (
+      //       players.filter((p) => p.active).length <= 1 &&
+      //       players.filter((p) => p.hasMoved).length > 1
+      //     ) {
+      //       break;
+      //     }
+      //   }
+
+      //   // Determine next player safely after board settles
+      //   let nextIdx = pIdx;
+      //   let activeCount = players.filter((p) => p.active).length;
+
+      //   if (activeCount > 1) {
+      //     do {
+      //       nextIdx = (nextIdx + 1) % players.length;
+      //     } while (!players[nextIdx].active);
+      //   }
+
+      //   currentPlayerIdx = nextIdx;
+      //   updateStatus();
+      //   isProcessing = false;
+      //   checkWin();
+      // }
+
       async function executeMove(startR, startC, pIdx) {
         isProcessing = true;
         players[pIdx].hasMoved = true;
@@ -722,31 +804,25 @@
           }
 
           queue = nextQueue;
-          refreshActivePlayers();
-
-          // Optimization: Stop computing cascades if the game is already won
-          if (
-            players.filter((p) => p.active).length <= 1 &&
-            players.filter((p) => p.hasMoved).length > 1
-          ) {
-            break;
-          }
+          // We removed the mid-animation elimination check from here
         }
 
-        // Determine next player safely after board settles
-        let nextIdx = pIdx;
-        let activeCount = players.filter((p) => p.active).length;
+        // 4. The board has completely settled. NOW check who survived.
+        refreshActivePlayers();
+        checkWin();
 
+        // 5. Determine next player ONLY if the game isn't over
+        let activeCount = players.filter((p) => p.active).length;
         if (activeCount > 1) {
+          let nextIdx = pIdx;
           do {
             nextIdx = (nextIdx + 1) % players.length;
           } while (!players[nextIdx].active);
+          currentPlayerIdx = nextIdx;
         }
 
-        currentPlayerIdx = nextIdx;
         updateStatus();
         isProcessing = false;
-        checkWin();
       }
 
       function refreshActivePlayers() {
