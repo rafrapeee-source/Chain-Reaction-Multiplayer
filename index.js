@@ -73,7 +73,12 @@ io.on('connection', (socket) => {
       // io.to broadcasts to EVERYONE in the room, ensuring all clients 
       // process the move at the exact same time and in the exact same order.
       io.to(socket.roomName).emit('receive-move', data);
-  });
+    });
+
+    socket.on('skip-turn', (data) => {
+      // Tell everyone in the room to skip the current player
+      io.to(socket.roomName).emit('receive-skip', data);
+    });
 
     socket.on('disconnect', () => {
         const roomName = socket.roomName;
