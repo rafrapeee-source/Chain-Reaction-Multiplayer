@@ -32,7 +32,7 @@ io.on('connection', (socket) => {
         const player = {
             id: socket.id,
             name: playerName,
-            color: getPlayerColor(room.players.length)
+            color: getAvailableColor(room.players) // <--- Change this line
         };
         
         room.players.push(player);
@@ -99,9 +99,20 @@ io.on('connection', (socket) => {
     });
 });
 
-function getPlayerColor(index) {
-    const colors = ['#ff4d4d', '#4dff4d', '#4d4dff', '#ffff4d', '#ff4dff', '#4dffff', '#ff944d', '#ffffff'];
-    return colors[index];
+function getAvailableColor(playersInRoom) {
+  const colors = ['#ff4d4d', '#4dff4d', '#4d4dff', '#ffff4d', '#ff4dff', '#4dffff', '#ff944d', '#ffffff'];
+  
+  // Create a list of colors that are currently taken by players in the lobby
+  const usedColors = playersInRoom.map(p => p.color);
+  
+  // Find the first color in our list that isn't being used
+  for (let i = 0; i < colors.length; i++) {
+      if (!usedColors.includes(colors[i])) {
+          return colors[i];
+      }
+  }
+  
+  return colors[0]; // Fallback just in case
 }
 
 const PORT = process.env.PORT || 10000; // Render uses 10000 by default
